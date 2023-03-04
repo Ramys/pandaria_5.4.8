@@ -35,6 +35,7 @@
 #include "World.h"
 #include "AccountMgr.h"
 #include "AchievementMgr.h"
+#include "AuctionHouseBot.h"
 #include "AuctionHouseMgr.h"
 #include "BlackMarketMgr.h"
 #include "ObjectMgr.h"
@@ -1360,20 +1361,31 @@ void World::LoadConfigSettings(bool reload)
     m_float_configs[CONFIG_STATS_LIMITS_BLOCK] = sConfigMgr->GetFloatDefault("Stats.Limits.Block", 95.0f);
     m_float_configs[CONFIG_STATS_LIMITS_CRIT] = sConfigMgr->GetFloatDefault("Stats.Limits.Crit", 95.0f);
 
-    // Wow Token
-    m_bool_configs[CONFIG_WOW_TOKEN] = sConfigMgr->GetBoolDefault("Wow.Token", false);
-
     // Bonus played time reward
-    m_bool_configs[CONFIG_BONUS_TIME_REWARD] = sConfigMgr->GetBoolDefault("PlayedTimeReward.Enabled", false);
-    m_int_configs[CONFIG_PLAYED_TIME_REWARD] = sConfigMgr->GetIntDefault("PlayedTimeReward.Interval", 1200);
+    m_bool_configs[CONFIG_TIME_REWARD_ENABLED] = sConfigMgr->GetBoolDefault("Played.Time.Reward.Enabled", true);
+    m_bool_configs[CONFIG_TIME_REWARD_ITEM_ENABLED] = sConfigMgr->GetBoolDefault("Played.Time.Reward.Item.Enabled", false);
+    m_int_configs[CONFIG_TIME_REWARD_INTERVAL] = sConfigMgr->GetIntDefault("Played.Time.Reward.Interval", 1200);
 
-    //packet spoof punishment
+    m_int_configs[CONFIG_TIME_REWARD_ITEM_ID] = sConfigMgr->GetIntDefault("Played.Time.Reward.Item.ID", 49426);
+    m_int_configs[CONFIG_TIME_REWARD_ITEM_COUNT] = sConfigMgr->GetIntDefault("Played.Time.Reward.Item.Count", 1);
+
+    if (m_int_configs[CONFIG_TIME_REWARD_ITEM_COUNT] < 1)
+        m_int_configs[CONFIG_TIME_REWARD_ITEM_COUNT] = 1;
+
+    m_int_configs[CONFIG_TIME_REWARD_VP_COUNT] = sConfigMgr->GetIntDefault("Played.Time.Reward.VP.Count", 1);
+
+    if (m_int_configs[CONFIG_TIME_REWARD_VP_COUNT] < 1)
+        m_int_configs[CONFIG_TIME_REWARD_VP_COUNT] = 1;
+
+    // Packet spoof punishment
     m_int_configs[CONFIG_PACKET_SPOOF_POLICY] = sConfigMgr->GetIntDefault("PacketSpoof.Policy", (uint32)WorldSession::DosProtection::POLICY_KICK);
     m_int_configs[CONFIG_PACKET_SPOOF_BANMODE] = sConfigMgr->GetIntDefault("PacketSpoof.BanMode", (uint32)BAN_ACCOUNT);
     if (m_int_configs[CONFIG_PACKET_SPOOF_BANMODE] == BAN_CHARACTER || m_int_configs[CONFIG_PACKET_SPOOF_BANMODE] > BAN_IP)
         m_int_configs[CONFIG_PACKET_SPOOF_BANMODE] = BAN_ACCOUNT;
 
     m_int_configs[CONFIG_PACKET_SPOOF_BANDURATION] = sConfigMgr->GetIntDefault("PacketSpoof.BanDuration", 86400);
+
+    m_int_configs[CONFIG_AHBOT_UPDATE_INTERVAL] = sConfigMgr->GetIntDefault("AuctionHouseBot.Update.Interval", 20);
 
     m_bool_configs[CONFIG_CALCULATE_CREATURE_ZONE_AREA_DATA] = sConfigMgr->GetBoolDefault("Calculate.Creature.Zone.Area.Data", false);
     m_bool_configs[CONFIG_CALCULATE_GAMEOBJECT_ZONE_AREA_DATA] = sConfigMgr->GetBoolDefault("Calculate.Gameoject.Zone.Area.Data", false);
@@ -2206,6 +2218,8 @@ void World::SetInitialWorldSettings()
 
     m_timers[WUPDATE_DELETECHARS].SetInterval(DAY*IN_MILLISECONDS); // check for chars to delete every day
 
+    m_timers[WUPDATE_AHBOT].SetInterval(getIntConfig(CONFIG_AHBOT_UPDATE_INTERVAL) * IN_MILLISECONDS); // every 20 sec
+
     m_timers[WUPDATE_PINGDB].SetInterval(getIntConfig(CONFIG_DB_PING_INTERVAL)*MINUTE*IN_MILLISECONDS);    // Mysql ping time in minutes
 
     m_timers[WUPDATE_GUILDSAVE].SetInterval(getIntConfig(CONFIG_GUILD_SAVE_INTERVAL) * MINUTE * IN_MILLISECONDS);
@@ -2240,6 +2254,9 @@ void World::SetInitialWorldSettings()
 
     // Delete all characters which have been deleted X days before
     Player::DeleteOldCharacters(true);
+
+    TC_LOG_INFO("server.loading", "Initialize AuctionHouseBot...");
+    sAuctionBot->Initialize();
 
     // Delete all custom channels which haven't been used for PreserveCustomChannelDuration days.
     Channel::CleanOldChannelsInDB();
@@ -2498,6 +2515,13 @@ void World::Update(uint32 diff)
         RecordTimeDiff(nullptr);
         sAuctionMgr->Update();
         RecordTimeDiff("AuctionMgr::Update");
+    }
+
+    /// <li> Handle AHBot operations
+    if (m_timers[WUPDATE_AHBOT].Passed())
+    {
+        sAuctionBot->Update();
+        m_timers[WUPDATE_AHBOT].Reset();
     }
 
     /// <li> Handle session updates when the timer has passed
